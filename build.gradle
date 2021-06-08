@@ -1,0 +1,34 @@
+plugins {
+    id 'groovy'
+    id 'eclipse'
+}
+
+repositories {
+   flatDir {
+       dirs "$projectDir/runtime"
+   }
+   mavenLocal()
+   mavenCentral()
+}
+
+dependencies {
+    implementation group: 'org.codehaus.groovy', name: 'groovy', version: '3.0.+'
+    implementation group: 'org.codehaus.groovy', name: 'groovy-json', version: '3.0.+'
+    implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.8'
+
+    implementation 'ua.net.nlp:nlp_uk:1.0'
+}
+
+compileGroovy {
+    groovyOptions.forkOptions.jvmArgs = [ '-Dgroovy.grape.enable=false' ]
+}
+
+
+task run(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    main = "ua.net.nlp_uk.ubertext.UbetTextProcess"
+
+    jvmArgs '-Dgroovy.grape.enable=false'
+
+  //  args "--properties", propFile
+}
