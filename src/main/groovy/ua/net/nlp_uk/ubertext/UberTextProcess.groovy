@@ -55,6 +55,10 @@ private Properties loadProperties() {
     return properties
 }
 
+if( storeFiles ) {
+    new File(".files").mkdirs()
+}
+
 service = new MongoService(properties)
 
 try {
