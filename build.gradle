@@ -1,6 +1,7 @@
 plugins {
     id 'groovy'
     id 'eclipse'
+    id 'application'
 }
 
 repositories {
@@ -18,11 +19,9 @@ dependencies {
     implementation group: 'org.codehaus.groovy', name: 'groovy-json', version: '3.0.+'
     implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.8'
 //    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
-    // https://mvnrepository.com/artifact/org.slf4j/slf4j-api
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '1.7.+'
-    
-    
-    if( ! nlpUkProjectPresent ) {
+
+    if( ! nlpUkProjectPresent || ! project.gradle.taskGraph.hasTask('eclipse') ) {
         implementation "ua.net.nlp:nlp_uk:$nlpUkVersion"
     }
 }
@@ -38,17 +37,14 @@ compileGroovy {
 }
 
 
-task run(type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    main = "ua.net.nlp_uk.ubertext.UbetTextProcess"
-
-    jvmArgs '-Dgroovy.grape.enable=false'
-
-  //  args "--properties", propFile
+application {
+    mainClass = "ua.net.nlp_uk.ubertext.UberTextProcess"
+    applicationDefaultJvmArgs = ['-Dgroovy.grape.enable=false']
 }
 
+
 eclipse {
-    
+
     if( nlpUkProjectPresent ) {
         classpath {
             file {
