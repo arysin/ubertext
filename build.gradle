@@ -23,7 +23,7 @@ dependencies {
     
     
     if( ! nlpUkProjectPresent ) {
-        implementation 'ua.net.nlp:nlp_uk:$nlpUkVersion'
+        implementation "ua.net.nlp:nlp_uk:$nlpUkVersion"
     }
 }
 
