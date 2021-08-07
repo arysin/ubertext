@@ -30,7 +30,7 @@ Properties properties = loadProperties()
 def collections = properties['db.collections'].split(/[, ]+/)
 
 @Field
-def service
+MongoService service
 @Field
 CleanText cleanText = new CleanText(new CleanOptions())
 @Field
@@ -38,9 +38,11 @@ TokenizeText tokenizeText = new TokenizeText(new TokenizeText.TokenizeOptions())
 @Field
 LemmatizeText lemmatizeText = new LemmatizeText(new LemmatizeText.LemmatizeOptions(firstLemmaOnly: true))
 @Field
-def actions = properties['actions'].split(/[, ]+/)
+List<String> actions = properties['actions'].split(/[, ]+/)
 @Field
 boolean force = properties['force'] as Boolean
+@Field
+boolean storeFiles = properties['store.files'] as Boolean
 
 
 
@@ -57,10 +59,12 @@ service = new MongoService(properties)
 
 try {
     def ids = properties['ids'] ? properties['ids'].split(/[ ,]+/) : []
-    logger.info "IDs to process: $ids"
+    if( ids ) {
+        logger.info "IDs to process: $ids"
+    }
 
     collections.each { String collectionName ->
-        logger.info "Processing collection ${collectionName}"
+        logger.info "Processing collection: ${collectionName}"
 
         def collection = service.collection(collectionName)
     
@@ -89,8 +93,6 @@ finally {
 
 def process(MongoCollection collection, record) {
 
-//    println ":: " + it.text_length
-//    new File("text.txt").text = it.text    
 
     String text = record.text    
     if( ! text ) {
@@ -98,17 +100,31 @@ def process(MongoCollection collection, record) {
         return
     }
 
+    if( storeFiles ) {
+        new File(".files", "${record._id}_text.txt").text = record.text
+    }
+    
+    
     Bson idFilter = Filters.eq("_id", record._id)
 
     if( "clean" in actions ) {
         clean(collection, record)
+        if( storeFiles && record.clean?.text ) {
+            new File(".files", "${record._id}_clean.txt").text = record.clean.text
+        }
     }
 
     if( "tokenize" in actions ) {
         tokenize(collection, record)
+        if( storeFiles ) {
+            new File(".files", "${record._id}_tokens.txt").text = record.nlp.tokens
+        }
     }
 
     if( "lemmatize" in actions ) {
+        if( storeFiles ) {
+            new File(".files", "${record._id}_lemmas.txt").text = record.nlp.lemmas
+        }
         lemmatize(collection, record)
     }
 
@@ -119,7 +135,7 @@ void tokenize(MongoCollection collection, record) {
         
         logger.info "Tokenizing ${record._id}"
         
-        String text = record.clean && record.clean.text ?: record.text 
+        String text = record.clean?.text ?: record.text 
 
         def tokens = tokenizeText.splitWords(text, true)
 
@@ -144,7 +160,7 @@ void lemmatize(MongoCollection collection, record) {
     if( needNlp() ) {
         logger.info "Lemmatizing ${record._id}"
 
-        String text = record.clean && record.clean.text ?: record.text 
+        String text = record.clean?.text ?: record.text 
         
         Analyzed lemmas = lemmatizeText.analyzeText(text)
 
@@ -175,8 +191,9 @@ String clean(MongoCollection collection, record) {
         
         List updates = []
         
-        updates << Updates.unset("text_clean")
-        updates << Updates.unset("clean_text")
+        // remove old fields
+//        updates << Updates.unset("text_clean")
+//        updates << Updates.unset("clean_text")
         
         if( text != cleaned ) {
             updates << Updates.set("clean.text", cleaned)

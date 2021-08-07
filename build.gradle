@@ -11,12 +11,26 @@ repositories {
    mavenCentral()
 }
 
+boolean nlpUkProjectPresent = new File("${projectDir}/../nlp_uk/.project").isFile()
+
 dependencies {
     implementation group: 'org.codehaus.groovy', name: 'groovy', version: '3.0.+'
     implementation group: 'org.codehaus.groovy', name: 'groovy-json', version: '3.0.+'
     implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.8'
+//    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
+    // https://mvnrepository.com/artifact/org.slf4j/slf4j-api
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: '1.7.+'
+    
+    
+    if( ! nlpUkProjectPresent ) {
+        implementation 'ua.net.nlp:nlp_uk:$nlpUkVersion'
+    }
+}
 
-    implementation 'ua.net.nlp:nlp_uk:1.0'
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(11)
+    }
 }
 
 compileGroovy {
@@ -31,4 +45,26 @@ task run(type: JavaExec) {
     jvmArgs '-Dgroovy.grape.enable=false'
 
   //  args "--properties", propFile
+}
+
+eclipse {
+    
+    if( nlpUkProjectPresent ) {
+        classpath {
+            file {
+                //  <classpathentry combineaccessrules="false" kind="src" path="/nlp_uk"/>
+                whenMerged { classpath ->
+                    // TODO: this is hack, should we use configurations instead?
+                    logger.lifecycle "Using local eclipse dependencies"
+
+
+                    def gwtClasspath = entries.findAll { it.path.contains('nlp_uk') }
+                    entries.removeAll gwtClasspath
+
+                    def genSrc = new org.gradle.plugins.ide.eclipse.model.ProjectDependency('/nlp_uk')
+                    classpath.entries.add(genSrc)
+                }
+            }
+        }
+    }
 }
