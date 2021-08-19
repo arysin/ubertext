@@ -63,9 +63,14 @@ service = new MongoService(properties)
 
 try {
     def ids = properties['ids'] ? properties['ids'].split(/[ ,]+/) : []
+    def limit = -1
     if( ids ) {
         logger.info "IDs to process: $ids"
     }
+    else if( 'limit' in properties ) {
+        logger.info "Record limit is set to: $limit"
+        limit = properties['limit'] as int
+    } 
 
     collections.each { String collectionName ->
         logger.info "Processing collection: ${collectionName}"
@@ -81,10 +86,18 @@ try {
                 }
             }
         }
+        else if( limit ) {
+            collection.find()
+                .limit(limit)
+                .each {
+                    process(collection, it)
+                }
+        }
         else {
-            collection.find().each {
-                process(collection, it)
-            }
+            collection.find()
+                .each {
+                    process(collection, it)
+                }
         }
     }
 }
@@ -120,16 +133,16 @@ def process(MongoCollection collection, record) {
 
     if( "tokenize" in actions ) {
         tokenize(collection, record)
-        if( storeFiles ) {
+        if( storeFiles && record.nlp?.tokens ) {
             new File(".files", "${record._id}_tokens.txt").text = record.nlp.tokens
         }
     }
 
     if( "lemmatize" in actions ) {
-        if( storeFiles ) {
+        lemmatize(collection, record)
+        if( storeFiles && record.nlp?.lemmas ) {
             new File(".files", "${record._id}_lemmas.txt").text = record.nlp.lemmas
         }
-        lemmatize(collection, record)
     }
 
 }
