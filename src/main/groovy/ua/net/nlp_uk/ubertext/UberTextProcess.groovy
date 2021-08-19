@@ -195,7 +195,7 @@ void lemmatize(MongoCollection collection, record) {
 String clean(MongoCollection collection, record) {
     String text = record.text
 
-    if( force || ! record.clean.time ) {
+    if( force || ! record.clean?.time ) {
         logger.info "Cleaning ${record._id}"
         String cleaned = cleanText.cleanUp(text, new File("/dev/null"), new CleanOptions())
 
@@ -214,6 +214,9 @@ String clean(MongoCollection collection, record) {
         
         if( text != cleaned ) {
             updates << Updates.set("clean.text", cleaned)
+            if( record.clean == null ) {
+                record.clean = [:]
+            }
             record.clean.text = cleaned
         }
         println "uk: $ukRate / ru: $ruRate"
