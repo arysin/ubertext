@@ -69,13 +69,15 @@ try {
         logger.info "IDs to process: $ids"
     }
     else if( 'limit' in properties ) {
-        logger.info "Record limit is set to: $limit"
         limit = properties['limit'] as int
+        logger.info "Record limit is set to: $limit"
     } 
 
     collections.each { String collectionName ->
         logger.info "Processing collection: ${collectionName}"
         processedStats.clear()
+        long tm1 = System.currentTimeMillis()
+        int records = 0
 
         def collection = service.collection(collectionName)
     
@@ -85,24 +87,44 @@ try {
 
                 collection.find(idFilter).limit(1).each {
                     process(collection, it)
+                    records++
                 }
             }
         }
-        else if( limit ) {
+        else if( limit > 0 ) {
             collection.find()
                 .limit(limit)
                 .each {
                     process(collection, it)
+                    records++
                 }
         }
         else {
-            collection.find()
+            def filter = Filters.exists("nlp", false)
+
+            collection.find(filter)
                 .each {
                     process(collection, it)
+                    records++
+                    logger.debug "Done with record: $records"
+
+                    if( records % 100 == 0 ) {
+                        long tm2 = System.currentTimeMillis()
+                        long time = tm2-tm1
+                        long speed = records*1000000/(tm2-tm1)
+                        logger.info "Intermediate stats: time: $time, records: $records, ${speed/1000} records/s"
+                    }
                 }
         }
-        logger.info "Done with collection: $collectionName: $processedStats"
+
+        long tm2 = System.currentTimeMillis()
+        long time = tm2-tm1
+        long speed = records*1000000/(tm2-tm1)
+        logger.info "Done with collection: $collectionName: $processedStats, time: $time, records: $records, ${speed/1000} records/s"
     }
+}
+catch(Exception e) {
+    logger.error "Exception", e
 }
 finally {
     service.close()
@@ -124,28 +146,23 @@ def process(MongoCollection collection, record) {
         new File(".files", "${record._id}_text.txt").text = record.text
     }
     
+    if( text.size() > 3000000 ) {
+        logger.warn "Text too big for ${record._id}, size: ${record.text.size()}"
+        return
+    }
     
     Bson idFilter = Filters.eq("_id", record._id)
 
     if( "clean" in actions ) {
         clean(collection, record)
-        if( storeFiles && record.clean?.text ) {
-            new File(".files", "${record._id}_clean.txt").text = record.clean.text
-        }
     }
 
     if( "tokenize" in actions ) {
         tokenize(collection, record)
-        if( storeFiles && record.nlp?.tokens ) {
-            new File(".files", "${record._id}_tokens.txt").text = record.nlp.tokens
-        }
     }
 
     if( "lemmatize" in actions ) {
         lemmatize(collection, record)
-        if( storeFiles && record.nlp?.lemmas ) {
-            new File(".files", "${record._id}_lemmas.txt").text = record.nlp.lemmas
-        }
     }
 
 }
@@ -153,27 +170,34 @@ def process(MongoCollection collection, record) {
 
 // do nlp only if not done before or text is cleaned again
 boolean needNlp(record) {
-    force || ! record.nlp.time || \
-        (record.clean.text && record.clean.time \
-            && Instant.parse(record.clean.time).after(Instant.parse(record.nlp.time)) )
+    force || ! record.nlp?.time || \
+        (record.clean?.text && record.clean?.time \
+            && record.clean.time.after(record.nlp.time) )
 }
 
 void tokenize(MongoCollection collection, record) {
-    if( needNlp() ) {
-        
-        logger.info "Tokenizing ${record._id}"
+    if( needNlp(record) ) {
         
         String text = record.clean?.text ?: record.text 
 
+        logger.info "Tokenizing ${record._id}, size: ${text.size()}"
+
         def tokens = tokenizeText.splitWords(text, true)
-        def titleTokens = tokenizeText.splitWords(record.title, true)
-        
+        def titleTokens = record.title ? tokenizeText.splitWords(record.title, true) : ""
+
+        if( storeFiles && tokens ) {
+            new File(".files", "${record._id}_tokens.txt").text = tokens
+        }
+
         Bson updateOperation = Updates.combine(
             Updates.set("nlp.text.tokens", tokens),
             Updates.set("nlp.title.tokens", titleTokens),
             Updates.set("nlp.time", Instant.now()),
             // remove old fields
-            Updates.unset("nlp.tokens")
+            Updates.unset("nlp.tokens"),
+            // TEMPORARY: REMOVE: clean fields
+            Updates.unset("nlp.text.lemmas"),
+            Updates.unset("nlp.title.lemmas")
         )
 
         Bson idFilter = Filters.eq("_id", record._id)
@@ -182,30 +206,45 @@ void tokenize(MongoCollection collection, record) {
         logger.debug "Updated: {}", updateResult
         processedStats['tokenize']++
     }
+    else {
+        logger.info "Skipped tokenize for ${record._id}"
+        processedStats['tokenize.skip']++
+    }
 }
 
 void lemmatize(MongoCollection collection, record) {
-    if( needNlp() ) {
-        logger.info "Lemmatizing ${record._id}"
-
+    if( needNlp(record) ) {
         String text = record.clean?.text ?: record.text 
+
+        logger.info "Lemmatizing ${record._id}, size: ${text.size()}"
         
         Analyzed lemmas = lemmatizeText.analyzeText(text)
-        Analyzed titleLemmas = lemmatizeText.analyzeText(record.title)
+
+        if( storeFiles && lemmas ) {
+            new File(".files", "${record._id}_lemmas.txt").text = lemmas
+        }
+
+        List updates = []
         
-        Bson updateOperation = Updates.combine(
-            Updates.set("nlp.text.lemmas", lemmas.tagged),
-            Updates.set("nlp.title.lemmas", titleLemmas.tagged),
-            Updates.set("nlp.time", Instant.now()),
-            // remove old fields
-            Updates.unset("nlp.lemmas")
-        )
+        updates << Updates.set("nlp.text.lemmas", lemmas.tagged)
+        updates << Updates.set("nlp.time", Instant.now())
+        // remove old fields
+        updates << Updates.unset("nlp.lemmas")
+
+        if( record.title ) {
+            Analyzed titleLemmas = lemmatizeText.analyzeText(record.title)
+            updates << Updates.set("nlp.title.lemmas", titleLemmas.tagged)
+        }
 
         Bson idFilter = Filters.eq("_id", record._id)
-        UpdateResult updateResult = collection.updateOne(idFilter, updateOperation)
+        UpdateResult updateResult = collection.updateOne(idFilter, Updates.combine(updates))
 
         logger.debug "Updated {}", updateResult
         processedStats['lemmatize']++
+    }
+    else {
+        logger.info "Skipped lemmatize for ${record._id}"
+        processedStats['lemmatize.skip']++
     }
 }
 
@@ -213,8 +252,15 @@ String clean(MongoCollection collection, record) {
     String text = record.text
 
     if( force || ! record.clean?.time ) {
-        logger.info "Cleaning ${record._id}"
+        logger.info "Cleaning ${record._id}, size: ${text.size()}"
+
         String cleaned = cleanText.cleanUp(text, new File("/dev/null"), new CleanOptions())
+        // normalize for ubertext
+        cleaned = cleaned.replaceAll(/[\u2019\u02bc]/, "'")
+
+        if( storeFiles && cleaned && cleaned != text ) {
+            new File(".files", "${record._id}_clean.txt").text = cleaned
+        }
 
         float ukRate, ruRate
         (ukRate, ruRate) = cleanText.evalChunk(cleaned)
@@ -233,17 +279,19 @@ String clean(MongoCollection collection, record) {
             record.clean.text = cleaned
         }
         
-        String titleCleaned = cleanText.cleanUp(record.title, new File("/dev/null"), new CleanOptions())
-        if( record.title != titleCleaned ) {
-            updates << Updates.set("clean.title", titleCleaned)
-            if( record.clean == null ) {
-                record.clean = [:]
+        if( record.title ) {
+            String titleCleaned = cleanText.cleanUp(record.title, new File("/dev/null"), new CleanOptions())
+            if( record.title != titleCleaned ) {
+                updates << Updates.set("clean.title", titleCleaned)
+                if( record.clean == null ) {
+                    record.clean = [:]
+                }
+                record.clean.title = titleCleaned
             }
-            record.clean.title = titleCleaned
         }
 
         
-        println "uk: $ukRate / ru: $ruRate"
+        logger.info "uk: $ukRate / ru: $ruRate"
 //        if( ukRate < ruRate ) {
             updates << Updates.set("clean.ru_rate", ruRate)
             updates << Updates.set("clean.uk_rate", ukRate)
@@ -259,5 +307,9 @@ String clean(MongoCollection collection, record) {
             
             processedStats['clean']++
         }
+    }
+    else {
+        logger.info "Skipped clean for ${record._id}"
+        processedStats['clean.skip']++
     }
 }
