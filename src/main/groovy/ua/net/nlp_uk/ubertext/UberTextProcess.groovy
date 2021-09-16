@@ -80,7 +80,7 @@ try {
         int records = 0
 
         def collection = service.collection(collectionName)
-    
+
         if( ids ) {
             ids.each { id ->
                 Bson idFilter = Filters.eq("_id", id)
@@ -100,10 +100,22 @@ try {
                 }
         }
         else {
-            def filter = Filters.exists("nlp", false)
+            def filter = Filters.and(
+                Filters.exists("nlp", false),
+                Filters.ne("text", "")
+                )
 
-            collection.find(filter)
-                .each {
+//            logger.info "Records to process: " + collection.find(filter).estimatedDocumentCount()
+//            logger.info "Records to process: " + collection.countDocuments(filter)
+
+            int batchSize = 300
+            for(int ii=0; ; ii++) {
+                int prevRecords = records
+                logger.info "Processing batch $ii of size $batchSize..."
+
+                collection.find(filter)
+                  .limit(batchSize)
+                  .each {
                     process(collection, it)
                     records++
                     logger.debug "Done with record: $records"
@@ -111,16 +123,21 @@ try {
                     if( records % 100 == 0 ) {
                         long tm2 = System.currentTimeMillis()
                         long time = tm2-tm1
-                        long speed = records*1000000/(tm2-tm1)
-                        logger.info "Intermediate stats: time: $time, records: $records, ${speed/1000} records/s"
+                        double speed = (double)records*1000000/time/1000.0
+                        logger.info "Intermediate stats: time: $time, records: $records, $speed records/s"
                     }
                 }
+                if( records - prevRecords < batchSize ) {
+                    logger.info "Processed only ${records-prevRecords}, looks like we're done"
+                    break; // out of cursor loop
+                }
+           }
         }
 
         long tm2 = System.currentTimeMillis()
         long time = tm2-tm1
-        long speed = records*1000000/(tm2-tm1)
-        logger.info "Done with collection: $collectionName: $processedStats, time: $time, records: $records, ${speed/1000} records/s"
+        double speed = (double)records*1000000/time/1000.0
+        logger.info "Done with collection: $collectionName: $processedStats, time: $time, records: $records, $speed records/s"
     }
 }
 catch(Exception e) {
