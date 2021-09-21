@@ -3,6 +3,12 @@
 package ua.net.nlp_uk.ubertext
 
 import java.time.Instant
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
 
 import org.bson.conversions.Bson
 import org.nlp_uk.other.CleanText
@@ -19,6 +25,7 @@ import com.mongodb.client.model.Updates
 import com.mongodb.client.result.UpdateResult
 
 import groovy.transform.Field
+import groovy.transform.TypeChecked
 
 
 @Field
@@ -102,42 +109,54 @@ try {
         else {
             def filter = Filters.and(
                 Filters.exists("nlp", false),
-                Filters.ne("text", "")
+                Filters.exists("text", true),
+                Filters.ne("text", ""),
                 )
 
 //            logger.info "Records to process: " + collection.find(filter).estimatedDocumentCount()
 //            logger.info "Records to process: " + collection.countDocuments(filter)
 
+            ExecutorService pool = Executors.newWorkStealingPool()
+//            ForkJoinPool pool = ForkJoinPool.commonPool()
+   
             int batchSize = 300
             for(int ii=0; ; ii++) {
                 int prevRecords = records
                 logger.info "Processing batch $ii of size $batchSize..."
 
+//                def tasks = []
+                List<Future> futures = []
                 collection.find(filter)
                   .limit(batchSize)
-                  .each {
-                    process(collection, it)
-                    records++
-                    logger.debug "Done with record: $records"
-
-                    if( records % 100 == 0 ) {
-                        long tm2 = System.currentTimeMillis()
-                        long time = tm2-tm1
-                        double speed = (double)records*1000000/time/1000.0
-                        logger.info "Intermediate stats: time: $time, records: $records, $speed records/s"
+                  .each { record ->
+//                    logger.info "Record: $record"
+                    
+                    if( validateRecord(record) ) {
+                        futures << pool.submit({
+                            process(collection, record)
+                            records++
+                        })
                     }
                 }
+                
+                logger.info "Futures: $futures"
+                
+                futures.each { it.get() }
+//                logger.info "Tasks: ${tasks.size()}"
+//                pool.invokeAll(tasks)
+                
+                long tm2 = System.currentTimeMillis()
+                long time = tm2-tm1
+                double speed = (double)records*1000000/time/1000.0
+                logger.info "Intermediate stats: time: $time, records: $records, $speed records/s"
+
                 if( records - prevRecords < batchSize ) {
                     logger.info "Processed only ${records-prevRecords}, looks like we're done"
-                    break; // out of cursor loop
+                    break // out of cursor loop
                 }
            }
         }
 
-        long tm2 = System.currentTimeMillis()
-        long time = tm2-tm1
-        double speed = (double)records*1000000/time/1000.0
-        logger.info "Done with collection: $collectionName: $processedStats, time: $time, records: $records, $speed records/s"
     }
 }
 catch(Exception e) {
@@ -149,14 +168,11 @@ finally {
 }
 
 
-
-def process(MongoCollection collection, record) {
-
-
-    String text = record.text    
+boolean validateRecord(record) {
+    String text = record.text
     if( ! text ) {
         logger.warn "Empty text for ${record._id}"
-        return
+        return false
     }
 
     if( storeFiles ) {
@@ -165,23 +181,48 @@ def process(MongoCollection collection, record) {
     
     if( text.size() > 3000000 ) {
         logger.warn "Text too big for ${record._id}, size: ${record.text.size()}"
-        return
+        return false
     }
-    
-    Bson idFilter = Filters.eq("_id", record._id)
 
+    return true
+}
+
+
+def process(MongoCollection collection, record) {
+
+    List updates = []
+
+//    logger.info ">>> task"
+//    long tm10 = System.currentTimeMillis()
+    
     if( "clean" in actions ) {
-        clean(collection, record)
+        clean(collection, record, updates)
     }
 
     if( "tokenize" in actions ) {
-        tokenize(collection, record)
+        tokenize(collection, record, updates)
     }
 
     if( "lemmatize" in actions ) {
-        lemmatize(collection, record)
+        lemmatize(collection, record, updates)
     }
 
+//    long tm20 = System.currentTimeMillis()
+//    logger.info "=== processing time: " + (tm20-tm10)
+    
+    if( updates ) {
+        Bson idFilter = Filters.eq("_id", record._id)
+        synchronized(service) {
+//            long tm1 = System.currentTimeMillis()
+            UpdateResult updateResult = collection.updateOne(idFilter, Updates.combine(updates))
+//            long tm2 = System.currentTimeMillis()
+//            logger.info "Db update time: " + (tm2-tm1)
+            logger.debug "Updated: {}", updateResult
+        }
+    }
+//    logger.info "<<< task"
+//    logger.debug "Done with record: $records"
+    
 }
 
 
@@ -192,7 +233,7 @@ boolean needNlp(record) {
             && record.clean.time.after(record.nlp.time) )
 }
 
-void tokenize(MongoCollection collection, record) {
+void tokenize(MongoCollection collection, record, List updates) {
     if( needNlp(record) ) {
         
         String text = record.clean?.text ?: record.text 
@@ -206,21 +247,14 @@ void tokenize(MongoCollection collection, record) {
             new File(".files", "${record._id}_tokens.txt").text = tokens
         }
 
-        Bson updateOperation = Updates.combine(
-            Updates.set("nlp.text.tokens", tokens),
-            Updates.set("nlp.title.tokens", titleTokens),
-            Updates.set("nlp.time", Instant.now()),
-            // remove old fields
-            Updates.unset("nlp.tokens"),
-            // TEMPORARY: REMOVE: clean fields
-            Updates.unset("nlp.text.lemmas"),
-            Updates.unset("nlp.title.lemmas")
-        )
-
-        Bson idFilter = Filters.eq("_id", record._id)
-        UpdateResult updateResult = collection.updateOne(idFilter, updateOperation)
-
-        logger.debug "Updated: {}", updateResult
+        updates << Updates.set("nlp.text.tokens", tokens)
+        updates << Updates.set("nlp.title.tokens", titleTokens)
+        updates << Updates.set("nlp.time", Instant.now())
+//                    // remove old fields
+//        updates << Updates.unset("nlp.tokens")
+//                    // TEMPORARY: REMOVE: clean fields
+//        updates << Updates.unset("nlp.text.lemmas")
+//        updates << Updates.unset("nlp.title.lemmas")
         processedStats['tokenize']++
     }
     else {
@@ -229,7 +263,7 @@ void tokenize(MongoCollection collection, record) {
     }
 }
 
-void lemmatize(MongoCollection collection, record) {
+void lemmatize(MongoCollection collection, record, List updates) {
     if( needNlp(record) ) {
         String text = record.clean?.text ?: record.text 
 
@@ -241,8 +275,6 @@ void lemmatize(MongoCollection collection, record) {
             new File(".files", "${record._id}_lemmas.txt").text = lemmas
         }
 
-        List updates = []
-        
         updates << Updates.set("nlp.text.lemmas", lemmas.tagged)
         updates << Updates.set("nlp.time", Instant.now())
         // remove old fields
@@ -253,10 +285,6 @@ void lemmatize(MongoCollection collection, record) {
             updates << Updates.set("nlp.title.lemmas", titleLemmas.tagged)
         }
 
-        Bson idFilter = Filters.eq("_id", record._id)
-        UpdateResult updateResult = collection.updateOne(idFilter, Updates.combine(updates))
-
-        logger.debug "Updated {}", updateResult
         processedStats['lemmatize']++
     }
     else {
@@ -265,13 +293,14 @@ void lemmatize(MongoCollection collection, record) {
     }
 }
 
-String clean(MongoCollection collection, record) {
+String clean(MongoCollection collection, record, List updates) {
     String text = record.text
 
     if( force || ! record.clean?.time ) {
         logger.info "Cleaning ${record._id}, size: ${text.size()}"
 
-        String cleaned = cleanText.cleanUp(text, new File("/dev/null"), new CleanOptions())
+        File nullFile = new File("/dev/null")
+        String cleaned = cleanText.cleanUp(text, nullFile, new CleanOptions(), nullFile)
         // normalize for ubertext
         cleaned = cleaned.replaceAll(/[\u2019\u02bc]/, "'")
 
@@ -286,8 +315,6 @@ String clean(MongoCollection collection, record) {
             ruRate = Math.round(ruRate * 100)/100
         }
         
-        List updates = []
-        
         if( text != cleaned ) {
             updates << Updates.set("clean.text", cleaned)
             if( record.clean == null ) {
@@ -297,7 +324,7 @@ String clean(MongoCollection collection, record) {
         }
         
         if( record.title ) {
-            String titleCleaned = cleanText.cleanUp(record.title, new File("/dev/null"), new CleanOptions())
+            String titleCleaned = cleanText.cleanUp(record.title, nullFile, new CleanOptions(), nullFile)
             if( record.title != titleCleaned ) {
                 updates << Updates.set("clean.title", titleCleaned)
                 if( record.clean == null ) {
@@ -316,12 +343,6 @@ String clean(MongoCollection collection, record) {
         updates << Updates.set("clean.time", Instant.now())
             
         if( updates ) {
-            Bson idFilter = Filters.eq("_id", record._id)
-            Bson updateOperation = Updates.combine(updates)
-            UpdateResult updateResult = collection.updateOne(idFilter, updateOperation)
-
-            logger.debug "Updated: {}", updateResult
-            
             processedStats['clean']++
         }
     }
