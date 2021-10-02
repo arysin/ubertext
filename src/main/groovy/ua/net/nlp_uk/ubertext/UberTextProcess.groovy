@@ -69,6 +69,8 @@ if( storeFiles ) {
     new File(".files").mkdirs()
 }
 
+cleanText.setLogger(logger)
+
 service = new MongoService(properties)
 
 try {
