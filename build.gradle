@@ -40,6 +40,7 @@ compileGroovy {
 application {
     mainClass = "ua.net.nlp_uk.ubertext.UberTextProcess"
     applicationDefaultJvmArgs = ['-Dgroovy.grape.enable=false']
+//    applicationDefaultJvmArgs = ['-Dgroovy.grape.enable=false', "-XX:+FlightRecorder", "-XX:StartFlightRecording=disk=true,dumponexit=true,filename=recording.jfr"]
 }
 
 

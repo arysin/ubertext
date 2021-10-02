@@ -53,6 +53,8 @@ boolean storeFiles = properties['store.files'] as Boolean
 
 @Field
 Map processedStats = [:].withDefault { 0 }
+@Field
+int batchSize = 1000
 
 private Properties loadProperties() {
     Properties properties = new Properties()
@@ -79,6 +81,10 @@ try {
         limit = properties['limit'] as int
         logger.info "Record limit is set to: $limit"
     } 
+
+    if( 'batch.size' in properties ) {
+        batchSize = properties['batch.szie'] as int
+    }
 
     collections.each { String collectionName ->
         logger.info "Processing collection: ${collectionName}"
@@ -119,7 +125,6 @@ try {
             ExecutorService pool = Executors.newWorkStealingPool()
 //            ForkJoinPool pool = ForkJoinPool.commonPool()
    
-            int batchSize = 300
             for(int ii=0; ; ii++) {
                 int prevRecords = records
                 logger.info "Processing batch $ii of size $batchSize..."
@@ -139,7 +144,7 @@ try {
                     }
                 }
                 
-                logger.info "Futures: $futures"
+//                logger.info "Futures: $futures"
                 
                 futures.each { it.get() }
 //                logger.info "Tasks: ${tasks.size()}"
@@ -214,15 +219,19 @@ def process(MongoCollection collection, record) {
         Bson idFilter = Filters.eq("_id", record._id)
         synchronized(service) {
 //            long tm1 = System.currentTimeMillis()
-            UpdateResult updateResult = collection.updateOne(idFilter, Updates.combine(updates))
-//            long tm2 = System.currentTimeMillis()
-//            logger.info "Db update time: " + (tm2-tm1)
-            logger.debug "Updated: {}", updateResult
+            try {
+                UpdateResult updateResult = collection.updateOne(idFilter, Updates.combine(updates))
+    //            long tm2 = System.currentTimeMillis()
+    //            logger.info "Db update time: " + (tm2-tm1)
+                logger.debug "Updated: {}", updateResult
+            }
+            catch(com.mongodb.MongoTimeoutException e) {
+                logger.error("Timeout exception, ignoring...: {}", e.getMessage())
+            }
         }
     }
 //    logger.info "<<< task"
 //    logger.debug "Done with record: $records"
-    
 }
 
 
