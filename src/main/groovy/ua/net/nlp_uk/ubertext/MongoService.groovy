@@ -28,6 +28,8 @@ class MongoService {
     }
     
     def close() {
-        mongoClient.close()
+        if( mongoClient != null ) {
+            mongoClient.close()
+        }
     }
 }

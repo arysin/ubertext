@@ -15,20 +15,14 @@ repositories {
 boolean nlpUkProjectPresent = new File("${projectDir}/../nlp_uk/.project").isFile()
 
 dependencies {
-    implementation group: 'org.codehaus.groovy', name: 'groovy', version: '3.0.+'
-    implementation group: 'org.codehaus.groovy', name: 'groovy-json', version: '3.0.+'
-    implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.10'
-//    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
+    implementation group: 'org.apache.groovy', name: 'groovy', version: '4.0.+'
+    implementation group: 'org.apache.groovy', name: 'groovy-json', version: '4.0.+'
+    implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.11'
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.4.+'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '1.7.+'
 
     if( ! nlpUkProjectPresent || ! project.gradle.startParameter.taskNames.contains('eclipse') ) {
         implementation "ua.net.nlp:nlp_uk:$nlpUkVersion"
-    }
-}
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(11)
     }
 }
 
