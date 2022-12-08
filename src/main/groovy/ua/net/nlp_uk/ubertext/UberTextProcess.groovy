@@ -11,11 +11,14 @@ import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 
 import org.bson.conversions.Bson
-import org.nlp_uk.other.CleanText
-import org.nlp_uk.other.CleanText.CleanOptions
-import org.nlp_uk.tools.LemmatizeText
-import org.nlp_uk.tools.TokenizeText
-import org.nlp_uk.tools.LemmatizeText.Analyzed
+import ua.net.nlp.other.CleanText
+import ua.net.nlp.other.CleanText.CleanOptions
+import ua.net.nlp.tools.tag.TagTextCore
+import ua.net.nlp.tools.tag.TagOptions
+import ua.net.nlp.tools.tag.TagTextCore.TTR
+import ua.net.nlp.tools.tag.TagTextCore.TagResult
+import ua.net.nlp.tools.TokenizeText
+import ua.net.nlp.tools.tag.TagStats
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -43,7 +46,7 @@ CleanText cleanText = new CleanText(new CleanOptions())
 @Field
 TokenizeText tokenizeText = new TokenizeText(new TokenizeText.TokenizeOptions())
 @Field
-LemmatizeText lemmatizeText = new LemmatizeText(new LemmatizeText.LemmatizeOptions(firstLemmaOnly: true))
+TagTextCore tagText = new TagTextCore()
 @Field
 List<String> actions = properties['actions'].split(/[, ]+/)
 @Field
@@ -55,6 +58,17 @@ boolean storeFiles = properties['store.files'] as Boolean
 Map processedStats = [:].withDefault { 0 }
 @Field
 int batchSize = 1000
+
+@Field
+static final FIELD_PROCESSING_STATUS="processing_status"
+@Field
+static final PROCESSING_STATUS_CLEANSED="cleansed"
+@Field
+static final PROCESSING_STATUS_LANG_RATED="lang_rated"
+@Field
+static final PROCESSING_STATUS_TOKENIZED="tokenized"
+@Field
+static final PROCESSING_STATUS_LEMMATIZED="vesum_lemmatized"
 
 private Properties loadProperties() {
     Properties properties = new Properties()
@@ -70,6 +84,8 @@ if( storeFiles ) {
 }
 
 cleanText.setLogger(logger)
+
+tagText.setOptions(new TagOptions(singleTokenOnly: true))
 
 service = new MongoService(properties)
 
@@ -115,8 +131,17 @@ try {
                 }
         }
         else {
+            def orFilters = actions
+                .collect { String action ->
+                    if( action == "clean" ) action = "cleansed"
+                    if( action == "tokenize" ) action = "tokenized"
+                    Filters.not(Filters.in(FIELD_PROCESSING_STATUS, [action]))
+                }
+
             def filter = Filters.and(
-                Filters.exists("nlp", false),
+                Filters.or(
+                    orFilters
+                ),
                 Filters.exists("text", true),
                 Filters.ne("text", ""),
                 )
@@ -261,6 +286,7 @@ void tokenize(MongoCollection collection, record, List updates) {
         updates << Updates.set("nlp.text.tokens", tokens)
         updates << Updates.set("nlp.title.tokens", titleTokens)
         updates << Updates.set("nlp.time", Instant.now())
+        updates << Updates.addToSet(FIELD_PROCESSING_STATUS, [PROCESSING_STATUS_TOKENIZED])
 //                    // remove old fields
 //        updates << Updates.unset("nlp.tokens")
 //                    // TEMPORARY: REMOVE: clean fields
@@ -280,20 +306,25 @@ void lemmatize(MongoCollection collection, record, List updates) {
 
         logger.info "Lemmatizing ${record._id}, size: ${text.size()}"
         
-        Analyzed lemmas = lemmatizeText.analyzeText(text)
+        List<List<TTR>> taggedSentences = tagText.tagTextCore(text, null)
+
+        def lemmas = taggedSentences.collect { it.collect { ttr -> ttr.tokens[0].lemma } }.flatten()
 
         if( storeFiles && lemmas ) {
             new File(".files", "${record._id}_lemmas.txt").text = lemmas
         }
 
-        updates << Updates.set("nlp.text.lemmas", lemmas.tagged)
+        updates << Updates.set("nlp.text.lemmas", lemmas)
         updates << Updates.set("nlp.time", Instant.now())
+        updates << Updates.addToSet(FIELD_PROCESSING_STATUS, [PROCESSING_STATUS_LEMMATIZED])
         // remove old fields
         updates << Updates.unset("nlp.lemmas")
 
         if( record.title ) {
-            Analyzed titleLemmas = lemmatizeText.analyzeText(record.title)
-            updates << Updates.set("nlp.title.lemmas", titleLemmas.tagged)
+            List<List<TTR>> taggedSentences2 = tagText.tagTextCore(record.title, null)
+            def lemmas2 = taggedSentences2.collect { it.collect { ttr -> ttr.tokens[0].lemma } }.flatten()
+
+            updates << Updates.set("nlp.title.lemmas", lemmas2)
         }
 
         processedStats['lemmatize']++
@@ -352,7 +383,8 @@ String clean(MongoCollection collection, record, List updates) {
             updates << Updates.set("clean.uk_rate", ukRate)
 //        }
         updates << Updates.set("clean.time", Instant.now())
-            
+        updates << Updates.addToSet(FIELD_PROCESSING_STATUS, [PROCESSING_STATUS_CLEANSED, PROCESSING_STATUS_LANG_RATED])
+        
         if( updates ) {
             processedStats['clean']++
         }
