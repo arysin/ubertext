@@ -13,11 +13,6 @@ import com.mongodb.client.model.Filters
 import com.mongodb.client.model.Updates
 import com.mongodb.client.result.UpdateResult
 
-import ua.net.nlp.other.CleanText
-import ua.net.nlp.other.CleanText.CleanOptions
-import ua.net.nlp.tools.TagText
-import ua.net.nlp.tools.TokenizeText
-import ua.net.nlp.tools.tag.TagTextCore.TagResult
 import ua.net.nlp_uk.ubertext.MongoService
 
 
@@ -28,7 +23,7 @@ Logger logger = LoggerFactory.getLogger(getClass())
 Properties properties = loadProperties()
 
 @Field
-final String STORAGE_DIR = "../ubertext_tmp/txt3"
+final String STORAGE_DIR = "../ubertext_tmp/txt4"
 @Field
 def emptyCountMap = [:].withDefault { 0 } 
 
@@ -70,17 +65,18 @@ try {
 //'pravda_com_ua',
 //'umoloda_kyiv_ua',
 //'nashigroshi_org',
-//'tabloid_pravda_com_ua',
+//'wz_lviv_ua'
 
-'wz_lviv_ua'
-//'hromadske_ua',
+//'news_liga_net', //'ua_news_liga_net',
+//'tabloid_pravda_com_ua',
+        
 //'lb_ua',
-//'mpz_brovary_org',
-//'pik_cn_ua',
-//'procherk_info',
-//'ua_korrespondent_net',
-//'ua_news_liga_net',
-//'unian_ua',
+'hromadske_ua',
+//'mpz_brovary_org', // dead
+//'pik_cn_ua', // dead
+'procherk_info',
+'ua_korrespondent_net', // todo
+'unian_ua',
 ]
     
     collections.each { String collectionName ->

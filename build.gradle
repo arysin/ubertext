@@ -23,10 +23,8 @@ repositories {
 boolean nlpUkProjectPresent = new File("${projectDir}/../nlp_uk/.project").isFile()
 
 dependencies {
-    implementation group: 'org.codehaus.groovy', name: 'groovy', version: '3.+'
-    implementation group: 'org.codehaus.groovy', name: 'groovy-json', version: '3.+'
-//    implementation group: 'org.apache.groovy', name: 'groovy', version: '4.0.+'
-//    implementation group: 'org.apache.groovy', name: 'groovy-json', version: '4.0.+'
+    implementation group: 'org.apache.groovy', name: 'groovy', version: '4.0.+'
+    implementation group: 'org.apache.groovy', name: 'groovy-json', version: '4.0.+'
     implementation group: 'org.mongodb', name: 'mongodb-driver', version: '3.12.+'
     implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.4.+'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '1.7.+'
