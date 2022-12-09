@@ -1,7 +1,7 @@
 This is a project to use nlp_uk tools to clean, tokenize, and tag/lemmatize texts in ubertext database.
 The project is using Groovy.
 
-This project requires JDK >= 11 (tested up to 18)
+This project requires JDK >= 17
 
 Configuration for the DB and for actions to perform is in [config/config.properties](config/config.properties)
 
