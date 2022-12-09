@@ -54,7 +54,7 @@ eclipse {
                 //  <classpathentry combineaccessrules="false" kind="src" path="/nlp_uk"/>
                 whenMerged { classpath ->
                     // TODO: this is hack, should we use configurations instead?
-                    logger.lifecycle "Using local eclipse dependencies"
+                    logger.lifecycle "Using local Eclipse dependency for nlp_uk"
 
 
                     def gwtClasspath = entries.findAll { it.path.contains('nlp_uk') }
