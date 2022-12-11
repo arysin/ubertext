@@ -23,7 +23,7 @@ Logger logger = LoggerFactory.getLogger(getClass())
 Properties properties = loadProperties()
 
 @Field
-final String STORAGE_DIR = "../ubertext_tmp/txt4"
+final String STORAGE_DIR = "../ubertext_tmp/txt"
 @Field
 def emptyCountMap = [:].withDefault { 0 } 
 
@@ -68,15 +68,15 @@ try {
 //'wz_lviv_ua'
 
 //'news_liga_net', //'ua_news_liga_net',
-//'tabloid_pravda_com_ua',
         
+//'tabloid_pravda_com_ua',
+//'unian_ua',
 //'lb_ua',
-'hromadske_ua',
+//'hromadske_ua',
 //'mpz_brovary_org', // dead
 //'pik_cn_ua', // dead
-'procherk_info',
-'ua_korrespondent_net', // todo
-'unian_ua',
+//'procherk_info',
+//'ua_korrespondent_net', // todo
 ]
     
     collections.each { String collectionName ->
@@ -89,7 +89,7 @@ try {
             
             File folder = new File("$STORAGE_DIR/${source}")
             folder.mkdirs()
-            new File(folder, "empty.lst").text = ''
+//            new File(folder, "empty.lst").delete()
         
             def idFilter = Filters.regex("source_info.slug", ".*${source}.*")
             
@@ -99,17 +99,19 @@ try {
                 idFilter,
 //                Filters.regex('date_of_publish', "202[0-9].*")
 //                Filters.regex('{ $year: date_of_publish }', "202[0-9]")
-//                Filters.gte('date_of_publish', LocalDate.parse("2020-01-01")),
-//                Filters.lt('date_of_publish', LocalDate.parse("2023-01-01"))
+//                Filters.gte('date_of_publish', LocalDate.parse("2001-01-01")),
+//                Filters.lt('date_of_publish', LocalDate.parse("2020-01-01"))
                 )
                 
 
-            def cnts = [0, 0]
+            def cnts = ['total': 0, 'good': 0, 'exists': 0, 'years': new LinkedHashSet()]
             collection.find(filter) //.limit(1)
                     .each {
                         process(collection, it, cnts, source, folder)
                     }
-            logger.info "Files: ${cnts[0]}, created: ${cnts[1]}"
+            println ""
+            def yrs = cnts['years'].toSorted()
+            logger.info "Files: total ${cnts['total']}, created: ${cnts['good']}, exists: ${cnts['exists']}, years collected: ${yrs}"
         }
     }
 }
@@ -126,9 +128,14 @@ finally {
 
 def process(MongoCollection collection, record, cnts, String source, File folder) {
 
+    int curr = cnts['total'] + emptyCountMap[source]
+    if( curr > 0 && curr % 200 == 0 )
+        println "$curr"
+    
     String text = record.text
     if( ! text ) {
-        logger.warn "Empty text for ${record._id}"
+//        logger.warn "Empty text for ${record._id}"
+        print "."
         emptyCountMap[source] += 1
         
 //        new File(folder, "empty.lst") << record._id << "\n"
@@ -138,14 +145,16 @@ def process(MongoCollection collection, record, cnts, String source, File folder
 
     File file = new File(folder, "${record._id}.txt")
     
-    cnts[0]++
+    cnts['total']++
     if( file.isFile() && file.size() > 0 ) {
-        logger.info "${record._id}.txt exists - skipping"
+//        logger.info "${record._id}.txt exists - skipping"
+        print "-"
+        cnts['exists']++
         return
     }
         
     //logger.info "Writing ${record._id}.txt"
-    print "."
+    print "+"
     
     file.text = ''
     file << "${record.title}\n"
@@ -154,6 +163,14 @@ def process(MongoCollection collection, record, cnts, String source, File folder
     file << "---------\n"
     file << record.text
     file << "\n"
-    cnts[1]++
+    cnts['good']++
+    if( record.date_of_publish ) {
+        int year = record.date_of_publish.getYear()
+        if( year < 1900 ) year += 1900
+        cnts['years'] << year
+    }
+    else {
+        cnts['years'] << 'unknown'
+    }
 }
 
