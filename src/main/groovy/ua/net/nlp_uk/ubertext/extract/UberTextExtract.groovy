@@ -23,11 +23,9 @@ Logger logger = LoggerFactory.getLogger(getClass())
 Properties properties = loadProperties()
 
 @Field
-final String STORAGE_DIR = "../ubertext_tmp/txt"
-@Field
 def emptyCountMap = [:].withDefault { 0 } 
 
-def collections = ['news'] //properties['db.collections'].split(/[, ]+/)
+def collections = Collections.collections
 
 @Field
 MongoService service
@@ -35,7 +33,7 @@ MongoService service
 
 private Properties loadProperties() {
     Properties properties = new Properties()
-    File propertiesFile = new File('config/config.properties')
+    File propertiesFile = new File('config/extract.properties')
     propertiesFile.withInputStream {
         properties.load(it)
     }
@@ -46,63 +44,25 @@ private Properties loadProperties() {
 service = new MongoService(properties)
 
 try {
-    def sources = [
-//'hmarochos_kiev_ua',
-//'uanews_dp_ua',
-//'babel_ua',
-//'nv_ua',
-//'epravda_com_ua',
-// 'mil_in_ua',
-//'ye_ua',
-
-//'news_lugansk_ua',
-//'zhitomir_info',
-//'life_pravda_com_ua',
-//'zaxid_net',
-
-//'eurointegration_com_ua',
-//'zn_ua',
-//'pravda_com_ua',
-//'umoloda_kyiv_ua',
-//'nashigroshi_org',
-//'wz_lviv_ua'
-
-//'news_liga_net', //'ua_news_liga_net',
-        
-//'tabloid_pravda_com_ua',
-//'unian_ua',
-//'lb_ua',
-//'hromadske_ua',
-//'mpz_brovary_org', // dead
-//'pik_cn_ua', // dead
-//'procherk_info',
-//'ua_korrespondent_net', // todo
-]
     
-    collections.each { String collectionName ->
+    collections.each { String collectionName, List sources ->
         logger.info "Processing collection: ${collectionName}"
     
         def collection = service.collection(collectionName)
     
         sources.each { source ->
             logger.info "Processing source: ${source}"
-            
-            File folder = new File("$STORAGE_DIR/${source}")
-            folder.mkdirs()
-//            new File(folder, "empty.lst").delete()
+
+            File folder = Collections.getFolder(collectionName, source)
         
             def idFilter = Filters.regex("source_info.slug", ".*${source}.*")
             
-            Bson filter = source == 'news_lugansk_ua' ? idFilter 
-            :
-             Filters.and(
-                idFilter,
-//                Filters.regex('date_of_publish', "202[0-9].*")
-//                Filters.regex('{ $year: date_of_publish }', "202[0-9]")
-//                Filters.gte('date_of_publish', LocalDate.parse("2001-01-01")),
-//                Filters.lt('date_of_publish', LocalDate.parse("2020-01-01"))
-                )
-                
+            // source == 'news_lugansk_ua' 
+            Bson filter = Collections.filters  
+                    ? Filters.and(
+                        idFilter, Collections.filters
+                    )
+                    : idFilter 
 
             def cnts = ['total': 0, 'good': 0, 'exists': 0, 'years': new LinkedHashSet()]
             collection.find(filter) //.limit(1)
